@@ -1,0 +1,323 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+Purpose: analyzing indicators related to energy with the GDP of a country.
+
+Insert datasets and set variables
+```{r}
+setwd("C:/Users/lkim0/Desktop/capstone")
+# load libraries
+library(readxl)
+library(mice)
+library(dplyr)
+library(stringr)
+library(tidyr)
+library(data.table)
+library(maps)
+library(ggplot2)
+library(googleVis)
+library(shinydashboard)
+library(shiny)
+library(VIM)
+library(car)
+library(MASS)
+library(DMwR)
+library(DT)
+
+select = dplyr::select
+
+wdi = read_excel("W03b_wdi.xlsx")
+y = "NY.GDP.MKTP.CD" # (GDP (current US$)
+```
+
+Cleaning and manipulating the data:
+# filter unnecessary countries: Early-demographic dividend, (excluding high income), (IDA & IBRD countries), IDA, Heavily indebted poor countries (HIPC), High income, Late-demographic     dividend, Least developed countries: UN classification, Low & middle income, Low income, Lower middle income, OECD members, Other small states, Post-demographic dividend, Pre-demographic dividend, Small states, Upper middle income, World, Region country code
+```{r}
+# renaming wdi
+qual = c("country.name", "country.code", "indicator.name", "indicator.code")
+yr = 1960:2017
+yr = paste("x", yr, sep = "")
+colnames(wdi) = c(qual, yr)
+wdi$indicator.name = sapply(wdi$indicator.name, tolower)
+
+rm.reg = c("ARB","CEB","CSS","EAP","EAR","EAS","ECA","ECS","EUU","HIC","HPC","IBD","IBT","IDA","IDX",
+           "LAC","LCN","LDC","LIC","LMC","LMY","MEA","MIC","MNA","NAC","OED","OSS","PRE","PSS","PST",
+           "SAS","SSA","SSF","SST","TEA","TEC","TLA","TMN","TSA","UMC","WLD", "FCS", "INX", "IDB", "LTE")
+
+# Remove those regions, non-country data rows
+wdi = wdi %>% filter(!country.code %in% rm.reg)
+# filter out indicator codes related to energy and GDP
+en.word = c("energy", "electricity", "clean", "emission", "electrical", "power")
+ind.df = wdi %>% filter(str_detect(indicator.name, en.word[1]))
+
+  for(a in 2:length(en.word)) {
+    ind.df = rbind(ind.df, wdi %>% filter(str_detect(indicator.name, en.word[a])))
+  }
+
+ind.filter = as.data.frame(table(ind.df$indicator.name))
+
+final.df = wdi %>% filter(indicator.name %in% ind.filter$Var1 | indicator.code %in% y) %>%
+  select(one_of(qual, "x2015"))
+
+final.df = dcast(melt(as.data.table(final.df), id.vars = c("country.name", 
+                                                        "country.code","indicator.name", "indicator.code")), 
+               country.name + country.code + variable ~ indicator.code, value.var = "value")
+
+final.df = final.df %>% select(-variable)
+head(final.df)
+
+i = colnames(comp.df)
+ind.df = wdi %>% filter(country.code %in% "USA") %>% filter(indicator.code %in% i) %>% select(one_of(c("indicator.name","indicator.code")))
+ind.df
+
+```
+
+Deal with missingness:
+```{r}
+na = final.df %>% summarize_all(funs(sum(is.na(.))/n()))
+na = gather(na, key="feature", value="missing_pct")
+goodv = filter(na, missing_pct < 0.25)
+final.df = final.df %>% select(one_of(c(goodv$feature))) # filter NA
+# note: make sure to keep response variable after cleaning out the NAs
+final.df$variable = as.numeric(gsub("x", "", final.df$variable)) # change variable to a number
+#final.df$NY.GDP.MKTP.CD = final.df$NY.GDP.MKTP.CD/1000000000000 # GDP in the trillions
+
+summary(final.df)
+```
+
+analyze the missingness
+```{r}
+aft.transpose = c("country.name","country.code","variable")
+# visual analysis of missing data using mice functions
+par("mar")
+par(mar = c(1,1,1,1))
+md.pattern(final.df)
+
+mice.plot <- aggr(final.df, col=c('navyblue','yellow'),
+                  numbers=TRUE, sortVars=TRUE,
+                  labels=names(final.df), cex.axis=.7,
+                  gap=3, ylab=c("Missing data","Pattern"))
+mice.plot
+```
+
+impute using mice
+- there are 16 datasets that are created through this imputation method
+```{r}
+# clean the data for imputation
+miss.df = final.df %>% select(-one_of(aft.transpose))
+miss.df = scale(miss.df) # scale the data to impute it
+
+imputed.data <- mice(miss.df, m = 16, maxit = 50, method = 'pmm', seed = 500, trace = F)
+summary(imputed.data)
+
+comp.df <- mice::complete(imputed.data,8)
+comp.df
+
+i = colnames(comp.df)
+ind.df = wdi %>% filter(country.code %in% "USA") %>% filter(indicator.code %in% i) %>% select(one_of(c("indicator.name","indicator.code")))
+ind.df
+```
+
+Training the model:
+```{r}
+### split train and test set
+smp_size = floor(0.75*nrow(comp.df))
+set.seed(123)
+train.i = sample(seq_len(nrow(comp.df)), size = smp_size)
+train = comp.df[train.i,]
+test = comp.df[-train.i,]
+
+
+### testing to find the best model ###
+# note: the higher the VIF the higher the correlation
+fit = lm(NY.GDP.MKTP.CD ~ ., data = train)
+summary(fit)
+vif(fit) # VIF (EG.ELC.ACCS.ZS, EG.ELC.ACCS.RU.ZS, **EG.ELC.ACCS.UR.ZS)
+```
+
+model 2
+```{r}
+fit.1 = lm(NY.GDP.MKTP.CD ~ .-EG.ELC.ACCS.ZS, data = train)
+summary(fit.1)
+vif(fit.1) # one of the best models / EG.CFT.ACCS.ZS & NY.ADJ.DPEM.CD are the most significant
+```
+
+model 4
+```{r}
+fit.4 = lm(NY.GDP.MKTP.CD ~ .-EG.ELC.ACCS.ZS-EG.ELC.ACCS.RU.ZS-EG.CFT.ACCS.ZS, data = train)
+summary(fit.4)
+vif(fit.4) #NOT A GOOD MODEL, LOW ADJ. R-SQUARED
+```
+
+
+Second training using stepAIC: looking for best model with AIC
+# note: the lower the AIC the better
+```{r}
+fit.AIC = lm(NY.GDP.MKTP.CD ~ ., data = train)
+step = stepAIC(fit, trace = FALSE)
+step$anova
+
+  # AIC final model (THIS IS THE BETTER OF THE 2 TESTING)
+model = lm(NY.GDP.MKTP.CD ~ EG.CFT.ACCS.ZS + EG.ELC.ACCS.RU.ZS + NY.ADJ.DNGY.CD + NY.ADJ.DPEM.CD, data = train)
+summary(model)
+```
+
+```{r}
+# check what the explanatory variables are
+exp.var = c("EG.CFT.ACCS.ZS", "EG.ELC.ACCS.RU.ZS", "NY.ADJ.DNGY.CD", "NY.ADJ.DPEM.CD")
+ind.df = wdi %>% filter(country.code %in% "USA") %>% filter(indicator.code %in% exp.var) %>% select(one_of(c("indicator.name","indicator.code")))
+ind.df
+```
+Highest correlated variable
+NY.ADJ.DPEM.CD - adjusted savings: particulate emission damage (current us$)
+This indicator presents the damage caused by particulate emissions due to deaths.
+
+Prediction and confidence:
+```{r}
+test.feat = test %>% select(-y)
+pred = predict(model, newdata = test, interval = 'confidence')
+pred = unscale(pred, miss.df)
+pred.rname = rownames(pred)
+pred.rname = as.numeric(pred.rname)
+fin.df.row = final.df[pred.rname,] # filter the y's from final.df using the test row samples
+# combine final.df data w/ predictions
+test.pred = fin.df.row %>% select(one_of(c("country.name",y)))
+test.pred = cbind(test.pred, pred)
+
+head(test.pred, 10)
+summary(test.pred)
+```
+
+Visualisation:
+```{r}
+
+########## GVIS MAP ##########
+
+# 1. make a dataframe with country name and numbers
+gdp.map = final.df %>% select(one_of(c("country.name", y)))
+# filter out NAs just for the map
+gdp.map$bool = is.na(subset(gdp.map, select = y))
+gdp.map$bool = as.logical(gdp.map$bool)
+gdp.map = gdp.map %>% filter(bool == FALSE) %>% select(-bool)
+colnames(gdp.map) = c("country", "gdp.2015")
+gdp.map$gdp.2015 = gdp.map$gdp.2015
+gdp.map$scale = scale(gdp.map$gdp.2015) # standardization: (x - mean(x) / sd(x)
+gdp.map$log = log(gdp.map$gdp.2015)
+
+geo = gvisGeoChart(gdp.map, locationvar = "country",
+                   colorvar = "gdp.2015",
+                   options = list(
+                     colorAxis = "{colors: ['burlywood', 'cornsilk', 'gold']}",
+                     backgroundColor = "aliceblue",
+                     height = 450
+                   )
+)
+
+geo.stand = gvisGeoChart(gdp.map, locationvar = "country",
+                            colorvar = "scale",
+                            options = list(
+                              colorAxis = "{colors: ['burlywood', 'cornsilk', 'gold']}",
+                              backgroundColor = "aliceblue",
+                              height = 450
+                            )
+)
+
+geo.log = gvisGeoChart(gdp.map, locationvar = "country",
+                   colorvar = "log",
+                   options = list(
+                     colorAxis = "{colors: ['burlywood','cornsilk', 'gold']}",
+                     backgroundColor = "aliceblue",
+                     height = 450
+                   )
+)
+
+### CLEANING UP DATASETS FOR DISPLAY
+
+########## SHINY ##########
+# Shiny App
+dashHead = dashboardHeader(title = "World GDP vs. Energy")
+
+sideBar = dashboardSidebar(
+  sidebarMenu(
+    menuItem("2015 GDP Maps", tabName = "map"),
+    menuItem("Data", tabName = "data"),
+    menuItem("Trained Model", tabName = "model")
+  )
+)
+
+body = dashboardBody(
+  tabItems(
+      tabItem(
+        tabName = "map",
+        fluidPage(column(12, align = "center",
+                         h2("2015 GDP Map"),
+                         htmlOutput("geo"),
+                         h2("2015 Standardized GDP Map"),
+                         htmlOutput("geo.stand"),
+                         h2("2015 Log GDP Map"),
+                         htmlOutput("geo.log")
+                         )
+                  )
+        ),
+      tabItem(
+        tabName = "data",
+        fluidPage(column(12, align = "center",
+                         h2("2015 GDP and Energy Related Table"),
+                            tabsetPanel(
+                              tabPanel("Final DF", DT::dataTableOutput("final.df")),
+                              tabPanel("Pred Df", DT::dataTableOutput("test.pred"))
+                            
+                            )
+                          )
+                  )
+      ),
+      tabItem(
+        tabName = "model",
+        fluidPage(column(12, align = "center",
+                         h2("First Model Analysis"),
+                         h4("Summary of the model using all of the explanatory variables"),
+                         verbatimTextOutput(outputId = "sum.final.df"),
+                         h4("Summary of the best fit model"),
+                         verbatimTextOutput(outputId = "sum.test.pred")
+                         )
+                  )
+        )
+      )
+  )
+
+
+ui <- dashboardPage(dashHead,sideBar, body)
+
+server = function(input, output) {
+  
+  output$geo <- renderGvis({
+    map <- geo
+  })
+  output$geo.stand <- renderGvis({
+    map <- geo.stand
+  })
+  output$geo.log <- renderGvis({
+    map <- geo.log
+  })
+  output$final.df = DT::renderDataTable({
+    final.df}, option = list(scrollX = TRUE))
+  
+  output$test.pred = DT::renderDataTable({
+    test.pred}, option = list(scrollX = TRUE))
+  
+  output$sum.final.df <- renderPrint({
+    fit = lm(NY.GDP.MKTP.CD ~ ., data = train)
+    print(summary(fit))
+  })
+   output$sum.test.pred <- renderPrint({
+    model = lm(NY.GDP.MKTP.CD ~ EG.CFT.ACCS.ZS + EG.ELC.ACCS.RU.ZS + NY.ADJ.DNGY.CD + NY.ADJ.DPEM.CD, data = train)
+    print(summary(model))
+  })
+
+}
+
+shinyApp(ui, server)
+```
+
