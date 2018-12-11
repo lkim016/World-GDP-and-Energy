@@ -20,7 +20,7 @@ and
 
 2. change **C:\Users\lkim016\Desktop** to the path to the folder where you downloaded the above repository files
 
-**Note:** the dataset is too large to upload into GitHub so need to retrieve the dataset from below.
+**Note:** the dataset is too large to upload onto GitHub so need to retrieve the dataset from below.
 
 The world development indicators dataset: https://www.kaggle.com/worldbank/world-development-indicators
 
