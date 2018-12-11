@@ -31,3 +31,4 @@ Objective: Observe the world development indicators to analyze the correlation o
 
 2. The task is find five major indicators which could predict poverty of a country related to indicators of 'power' or 'energy'. By doing so, the World Bank and United Nations will be able to follow those predictors to reduce poverty.
 
+3. Write a R markdown with both explanation and script for your problem-solving project. The data is W03b_wdi.xlsx.
