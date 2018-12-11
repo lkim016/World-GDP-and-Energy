@@ -1,7 +1,7 @@
 #### Lori Kim
 #### clean energy and it's economic impact on the country
 
-setwd("C:/Users/lkim0/Desktop/capstone")
+#setwd("C:\Users\lkim016\Desktop")
 
 # install.packages("dplyr")
 # install.packages("data.table")
