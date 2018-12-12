@@ -25,7 +25,7 @@ and
 The world development indicators dataset: https://www.kaggle.com/worldbank/world-development-indicators
 
 ## Project Guide
-Objective: Observe the world development indicators to analyze the correlation of the different countries' GDP against energy related indicators for the year 2015.
+Objective: Analyze the world development indicators to explore the correlation between the different countries' GDP against energy related indicators for the year 2015.
 
 1. Since its founding in 1944, the World Bank has been gathering data (WDI: World Development Indicators) to help it alleviate poverty all cross the world. In this project, you will need to predict the main goal indicator: gdp per capita (current us$); code: NY.GDP.PCAP.CD) for those countries that have available data in 2015.  
 
